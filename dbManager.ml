@@ -1,40 +1,22 @@
-module Tid = struct
-  type t = int
-  let of_string = int_of_string
-  let to_string = string_of_int
-end
-
-module DBState = struct
-  type t = InUse
-           | Open
-           | Fresh
-  let of_string = function
-    | "INUSE" -> InUse
-    | "OPEN" -> Open
-    | "FRESH" -> Fresh
-    | s -> invalid_arg (s ^ " is not a valid database state")
-  let to_string = function
-    | InUse -> "INUSE"
-    | Open -> "OPEN"
-    | Fresh -> "FRESH"
-end
-
-type test_db =  (Tid.t * DBState.t * int * string)
-
 type config_map = (string * string) list
 
 module type ManagerBackend = sig
   type config
   type t
-  val get_user : t -> Tid.t -> string
-  val get_candidate_db : t -> test_db option
-  val mark_ready : t -> Tid.t -> int -> unit
+  type token
+  type host
+
+  type candidate = (DbState.db_candidate * host * string)
+  val string_of_token : token -> string
+  val get_user : t -> ([`InUse],_) DbState.tid -> string
+  val get_candidate_db : t -> candidate option
+  val mark_ready : t -> (_,[`Setup]) DbState.tid -> int -> token
   val connect : config -> t
-  val release : t -> Tid.t -> unit
-  val assign_user : t -> int -> Tid.t -> string
-  val get_hostname : t -> int -> string
-  (* TODO: someday replace me with a real configuration format *)
-  val config_of_map : (string * string) list -> config
+  val load_db : string -> DbState.to_return
+  val release : t -> ([ `InUse ],[`Return]) DbState.tid -> unit
+  val assign_user : t -> host -> ([< `Fresh |  `Open],[`Setup]) DbState.tid -> string
+  val get_hostname : t -> host -> string
+  val config_of_map : config_map -> config
   val destroy : t -> unit
 end
 
@@ -56,6 +38,13 @@ module Make(M : ManagerBackend)(T : TestDatabase) = struct
     setup_file : string;
     reset_file : string
   }
+  type connection_info = {
+    hostname: string;
+    db_name: string;
+    username: string;
+    password: string;
+    token: string
+  }
   let read_file_fully s = 
     let in_c = open_in s in
     let file_size = in_channel_length in_c in
@@ -67,29 +56,44 @@ module Make(M : ManagerBackend)(T : TestDatabase) = struct
     let manager = M.connect conf.mdb_config in
     match (M.get_candidate_db manager) with
       | None -> None
-      | Some (tid, state, host, db_name) ->
+      | Some (state, host, db_name) ->
           let hostname = M.get_hostname manager host in
           let new_pass = "foobar" in
           let admin_conn = T.admin_connection conf.tdb_config hostname db_name in
           let username = match state with
-            | DBState.InUse -> M.get_user manager tid 
-            | _ -> M.assign_user manager host tid in
+            | DbState.InUse tid -> M.get_user manager tid 
+            | DbState.Open tid -> M.assign_user manager host tid
+            | DbState.Fresh tid -> 
+                M.assign_user manager host tid in
           T.set_user_password admin_conn username new_pass;
           (match state with 
-            | DBState.InUse -> T.kill_connections admin_conn username
-            | DBState.Open | DBState.Fresh -> ());
+            | DbState.InUse _ -> T.kill_connections admin_conn username
+            | DbState.Open _ | DbState.Fresh _ -> ());
           let cmd_file = match state with
-            | DBState.InUse | DBState.Open -> conf.reset_file 
-            | DBState.Fresh -> conf.setup_file in
+            | DbState.InUse _  | DbState.Open _ -> conf.reset_file 
+            | DbState.Fresh _ -> conf.setup_file in
+          let tid = match state with
+            | DbState.Fresh tid -> (tid :> ([`InUse | `Open | `Fresh],[`Setup]) DbState.tid)
+            | DbState.InUse tid -> (tid :> ([`InUse | `Open | `Fresh],[`Setup]) DbState.tid)
+            | DbState.Open tid -> (tid :> ([`InUse | `Open | `Fresh],[`Setup]) DbState.tid) in
           let cmd_sql = read_file_fully cmd_file in
           T.run_commands admin_conn cmd_sql;
-          M.mark_ready manager tid lease;
+          let token = M.mark_ready manager tid lease in
           T.disconnect admin_conn;
           M.destroy manager;
-          Some (tid, hostname, db_name, username, new_pass)
-  let release conf tid = 
+          Some {
+            hostname = hostname;
+            db_name = db_name;
+            username = username;
+            password = new_pass;
+            token = (M.string_of_token token)
+          }
+  let release conf token = 
     let manager = M.connect conf.mdb_config in
-    M.release manager tid;
+    let db = M.load_db token in
+    (match db with
+      | DbState.InUse tid -> M.release manager tid
+      | _ -> M.destroy manager; failwith "Token database was not reserved");
     M.destroy manager
   let init conf_map = 
     {
