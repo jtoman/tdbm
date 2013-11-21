@@ -1,9 +1,12 @@
 type config = string
 type t = Sqlite3.db
 
-let find_sql = "SELECT * FROM (SELECT id, db_host, db_name, state FROM db_state WHERE state = 'OPEN' OR state = 'FRESH' UNION SELECT id, db_host, db_name, state FROM db_state WHERE state = 'INUSE' AND expiry < ?) LIMIT 1";;
+let find_sql = Printf.sprintf "SELECT * FROM (SELECT id, db_host, db_name, state FROM db_state WHERE state = %s OR state = %s UNION SELECT id, db_host, db_name, state FROM db_state WHERE state = %s AND expiry < ?) LIMIT 1"
+  (DbState.string_of_status `Open)
+  (DbState.string_of_status `Fresh)
+  (DbState.string_of_status `InUse)
 
-let reserve_sql = "UPDATE db_state SET state = 'SETUP' WHERE id = :id;";;
+let reserve_sql = "UPDATE db_state SET state = ? WHERE id = ?";;
 
 exception SqliteException of Sqlite3.Rc.t
 
