@@ -35,12 +35,3 @@ let config_of_map config_map =
 
 let disconnect (conn : t) = 
   conn#finish;;
-
-
-
-
-
-
-
-
-

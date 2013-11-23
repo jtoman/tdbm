@@ -3,10 +3,6 @@ type status = [
 | `Open
 | `Fresh
 ]
-let string_of_status = function
-  | `InUse -> "INUSE"
-  | `Open -> "OPEN"
-  | `Fresh -> "FRESH"
 type tid' = int
 type (+'a,'b) tid = tid' constraint 'b = [< `Setup | `Return ] constraint 'a = [< status ]
 type 'status db_state = 
@@ -16,22 +12,45 @@ type 'status db_state =
 type db_candidate = [`Setup] db_state
 type to_return = [`Return] db_state
 
-let of_string id state = 
-  let tid = int_of_string id in
-  match state with
+let string_of_status = function 
+  | `InUse -> "INUSE"
+  | `Open -> "OPEN"
+  | `Fresh -> "FRESH"
+
+module type StateBackend = sig
+  type config
+  type t
+  type token
+  type host
+
+  type candidate = (db_candidate * host * string)
+  val string_of_token : token -> string
+  val get_user : t -> ([`InUse],_) tid -> string
+  val get_candidate_db : t -> candidate option
+  val mark_ready : t -> (_,[`Setup]) tid -> int -> token
+  val connect : config -> t
+  val load_db : t -> string -> to_return
+  val release : t -> ([ `InUse ],[`Return]) tid -> unit
+  val assign_user : t -> host -> ([< `Fresh | `Open],[`Setup]) tid -> string
+  val get_hostname : t -> host -> string
+  val config_of_map : Config.config_map -> config
+  val destroy : t -> unit
+end
+
+module type DbAccess = sig
+  type db_tid = int
+  val of_db : db_tid -> string -> 'a db_state
+  val unwrap_tid : (_,_) tid -> db_tid
+end
+
+module type BackendFunctor= functor(DBA : DbAccess) -> StateBackend
+
+module Make(BF: BackendFunctor) = BF(struct
+  type db_tid = int
+  let of_db tid = function
     | "INUSE" -> InUse tid
     | "OPEN" -> Open tid
     | "FRESH" -> Fresh tid
-    | _ -> invalid_arg (state ^ " is not a valid state")
-        
-type bare_tid = tid'
-type transitions = [`InUse | `Setup | `Open ]
-type transition_state = (bare_tid * transitions)
-let change_state tid new_state = (tid, new_state)
-let to_string (bare_tid, s) =  
-  let s_tid = string_of_int bare_tid in
-  let state_string = match s with 
-    | `InUse -> "INUSE"
-    | `Open  -> "OPEN"
-    | `Setup -> "SETUP" in
-  (s_tid, state_string)
+    | state -> invalid_arg (state ^ " is not a valid state")
+  let unwrap_tid tid = tid
+end)
