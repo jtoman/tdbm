@@ -17,11 +17,23 @@ let string_of_status = function
   | `Open -> "OPEN"
   | `Fresh -> "FRESH"
 
+module type AdminInterface = sig
+   type admin_conn
+   val add_host : admin_conn -> string -> unit
+   val list_hosts : admin_conn -> string list
+   val add_db : admin_conn -> string -> string -> unit
+   val enter_maintainence : admin_conn -> string -> string -> unit
+   val leave_maintainence : admin_conn -> string -> string -> unit
+   val dump : admin_conn -> db_status
+end
+
 module type StateBackend = sig
   type config
   type t
   type token
   type host
+
+  module Admin : AdminInterface with admin_conn := t
 
   type candidate = (db_candidate * host * string)
   val string_of_token : token -> string

@@ -64,6 +64,41 @@ module SqliteBackendF(DBA : DbState.DbAccess) = struct
     (DbState.string_of_status `Fresh)
     (DbState.string_of_status `InUse)
 
+  module Admin = struct
+     let add_db_sql = 
+       "INSERT INTO db_state(db_host, db_name, state) VALUES(?,?,?)"
+     let find_host = "SELECT id FROM db_hosts WHERE host_name = ?";;
+     let add_database conn host database = 
+       let find_host_stmt = Sqlite3.prepare conn find_host in
+       Dbal.bind_index 1 (Sqlite3.Data.TEXT host);
+       let host = Dbal.map_object find_host_stmt (fun s -> (Dbal.extract_int s.(0))) in
+       let add_db_stmt = Sqlite3.prepare conn add_db_sql in
+       Dbal.bind_index add_db_stmt 1 (int_param host);
+       Dbal.bind_index add_db_stmt 2 (Sqlite3.Data.TEXT database);
+       Dbal.bind_index add_db_stmt 3 (Sqlite3.Data.TEXT (DbState.string_of_status `Fresh));
+       Dbal.db_exec add_db_stmt
+     let add_host_sql = "INSERT INTO db_hosts(host_name) VALUES(?)"
+     let add_host conn host = 
+       let add_host_stmt = Sqlite3.conn add_host_sql in
+       Dbal.bind_index add_host_stmt 1 (Sqlite3.Data.TEXT host);
+       Dbal.db_exec add_host_stmt
+     let enter_maint_sql = "UPDATE db_state SET state = ? WHERE db_name = ? AND db_host in (SELECT id FROM db_hosts WHERE host_name = ?)"
+     let enter_maintainence conn host db = 
+       let enter_maint_stmt = Sqlite3.prepare conn enter_maint_sql in
+       Dbal.bind_index enter_maint_stmt 1 (Sqlite3.Data.TEXT "MAINT");
+       Dbal.bind_index enter_maint_stmt 2 (Sqlite3.Data.TEXT db);
+       Dbal.bind_index enter_maint_stmt 3 (Sqlite3.Data.TEXT host);
+       Dbal.db_exec enter_maint_stmt
+     let leave_maint_sql = "UPDATE db_state SET state = ? WHERE db_name = ? AND state = ? AND db_host in (SELECT id FROM db_hosts WHERE host_name = ?)"
+     let leave_maintainence conn host db new_state = 
+       let leave_maint_stmt = Sqlite3.prepare conn leave_maint_sql in
+       Dbal.bind_index leave_maint_stmt 1 (Sqlite3.Data.TEXT (DbAccess.string_of_state new_state));
+       Dbal.bind_index leave_maint_stmt 2 (Sqlite3.Data.TEXT db);
+       Dbal.bind_index leave_maint_stmt 3 "MAINT");
+       Dbal.bind_index leave_maint_stmt 4 (Sqlite3.Data.TEXT host);
+       Dbal.db_exec leave_maint_stmt
+  end
+
   let update_state_sql = "UPDATE db_state SET state = ? WHERE id = ?";;
       
   let connect db_file = Sqlite3.db_open db_file

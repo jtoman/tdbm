@@ -14,11 +14,28 @@ type to_return = [`Return] db_state
 
 val string_of_status : status -> string
 
+type db_status = (string * db_st) list and
+db_st = {
+  users: string list;
+  databases: (string * [ `Setup | `Maintainence | `InUse of (string * string) | `Open | `Fresh ])
+}
+
+module type AdminInterface = sig
+   type admin_conn
+   val add_host : admin_conn -> string -> unit
+   val add_db : admin_conn -> string -> string -> unit
+   val enter_maintainence : admin_conn -> string -> string -> unit
+   val leave_maintainence : admin_conn -> string -> string -> [`Fresh | `Open ] -> unit
+   val dump : admin_conn -> db_status
+end
+
 module type StateBackend = sig
   type config
   type t
   type token
   type host
+
+  module Admin : AdminInterface with admin_conn := t
 
   type candidate = (db_candidate * host * string)
   val string_of_token : token -> string

@@ -5,12 +5,12 @@ CREATE TABLE db_hosts(
 
 
 CREATE TABLE db_state(id INTEGER PRIMARY KEY AUTOINCREMENT,
-       -- this should really be de-normalized
        db_host INTEGER,
        db_name TEXT,
        -- ONE OF 'INUSE', 'SETUP', 'OPEN', 'FRESH', 'MAINT'
        state TEXT,
        expiry INTEGER,
+	   token TEXT,
        FOREIGN KEY (db_host) REFERENCES db_hosts(id)
 );
 
