@@ -80,17 +80,18 @@ module Make(M : DbState.StateBackend)(T : TestDatabase) = struct
     M.release manager token;
     M.destroy manager
   let init conf_map = 
-    let root = LibConfig.get_group conf_map "sql" in
+    let root = LibConfig.sub_root conf_map "sql" in
     if not (LibConfig.validate root (`Group [
       ("setup", `String);
       ("reset", `String)
     ])) then
       failwith "Bad configuration, missing sql file names"
     else
+      let get_s = LibConfig.get_scalar root LibConfig.string_value in
       {
         tdb_config = T.config_of_map conf_map;
         mdb_config = M.config_of_map conf_map;
-        setup_file = (LibConfig.get_scalar root ~path:"setup" LibConfig.string_value);
-        reset_file = (LibConfig.get_scalar root ~path:"reset" LibConfig.string_value)
+        setup_file = (get_s "setup");
+        reset_file = (get_s "reset")
       }
 end

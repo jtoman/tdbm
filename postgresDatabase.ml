@@ -31,11 +31,11 @@ let kill_connections (conf,(conn : Postgresql.connection)) user =
 
 let run_commands (conf,(conn : Postgresql.connection)) command = 
   try 
-    ignore (conn#exec ~expect:[Postgresql.Tuples_ok; Postgresql.Command_ok; Postgresql.Copy_in ] command)
+    ignore (conn#exec ~expect:[Postgresql.Tuples_ok; Postgresql.Command_ok ] command)
   with Postgresql.Error e -> failwith (Postgresql.string_of_error e)
 
 let config_of_map config_map = 
-  let root = LibConfig.get_group config_map "psql" in
+  let root = LibConfig.sub_root config_map "psql" in
   if not (LibConfig.validate root (`Group [
     ("user", `String);
     ("pass", `String);
@@ -43,11 +43,12 @@ let config_of_map config_map =
   ])) then
     failwith "Bad configuration"
   else
+    let get_s = LibConfig.get_scalar root LibConfig.string_value in
     {
       port = 5432;
-      admin_user = LibConfig.get_scalar root ~path:"user" LibConfig.string_value;
-      admin_pass = LibConfig.get_scalar root ~path:"pass" LibConfig.string_value;
-      user_role = LibConfig.get_scalar root ~path:"role" LibConfig.string_value
+      admin_user = get_s "user";
+      admin_pass = get_s "pass";
+      user_role = get_s "role"
     }
 
 let disconnect (conf,(conn : Postgresql.connection)) = 

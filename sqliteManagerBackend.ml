@@ -234,7 +234,7 @@ module SqliteBackendF(DBA : DbState.DbAccess) = struct
     ignore (Sqlite3.db_close conn)
       
   let config_of_map m = 
-    LibConfig.get_scalar m ~path:"sqlite.db_file" LibConfig.string_value
+    LibConfig.get_scalar m LibConfig.string_value "sqlite.db_file"
 
   let string_of_token t = t
 end
