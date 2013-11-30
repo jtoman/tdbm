@@ -1,12 +1,20 @@
 module StateBackend = DbState.Make(SqliteManagerBackend.SqliteBackendF)
-module Manager = DbManager.Make(StateBackend)(PostgresDatabase);;
+module Manager = DbManager.Make(StateBackend)(PostgresDatabase)
 
-let m = Manager.init [("sql.setup", "setup"); ("sql.reset", "reset"); ("sqlite.db_file", "test_db.sqlite")] in
-match Manager.reserve m 1 with
-  | None -> failwith "oops"
-  | Some (tid, hostname, db_name, user, password) ->
-      Printf.printf "Got %d %s %s %s %s\n" tid hostname db_name user password;
-      try 
+let config = Config.load_config "/home/john/hacking/tdbm/tdbm.cfg";;
+
+let manager = Manager.init config in
+match Sys.argv.(1) with
+  | "reserve" -> 
+      let conn_info = Manager.reserve manager (int_of_string Sys.argv.(2)) in
+      (match conn_info with
+        | None -> print_endline "No available databases"
+        | Some dbi -> Printf.printf "h: %s\ndb: %s\nu: %s\np: %s\ntoken: %s\n"
+            dbi.Manager.hostname
+          dbi.Manager.db_name
+          dbi.Manager.username
+          dbi.Manager.password
+          dbi.Manager.token)
         
-        Manager.release m tid
-      with SqliteManagerBackend.SqliteException r -> print_endline (Sqlite3.Rc.to_string r)
+  | "release" -> Manager.release manager Sys.argv.(2)
+  | _ -> failwith ("Unknown command " ^ Sys.argv.(1))

@@ -4,10 +4,10 @@ module type TestDatabase = sig
   type config
   type t
   val admin_connection : config -> string -> string -> t
-  val set_user_password : t -> string -> string -> unit
+  val set_user_credentials : t -> string -> string -> unit
   val kill_connections : t -> string -> unit
   val run_commands : t -> string -> unit
-  val config_of_map : (string * string) list -> config
+  val config_of_map : Config.config_map -> config
   val disconnect : t -> unit
 end
 
@@ -25,6 +25,13 @@ module Make(M : DbState.StateBackend)(T : TestDatabase) = struct
     password: string;
     token: string
   }
+
+  let generate_password () = 
+    Random.self_init ();
+    let random_number = Random.bits () in
+    let hash = Digest.string (string_of_int random_number) in
+    Digest.to_hex hash
+
   let read_file_fully s = 
     let in_c = open_in s in
     let file_size = in_channel_length in_c in
@@ -38,14 +45,14 @@ module Make(M : DbState.StateBackend)(T : TestDatabase) = struct
       | None -> None
       | Some (state, host, db_name) ->
           let hostname = M.get_hostname manager host in
-          let new_pass = "foobar" in
+          let new_pass = generate_password () in
           let admin_conn = T.admin_connection conf.tdb_config hostname db_name in
           let username = match state with
             | DbState.InUse tid -> M.get_user manager tid 
             | DbState.Open tid -> M.assign_user manager host tid
             | DbState.Fresh tid -> 
                 M.assign_user manager host tid in
-          T.set_user_password admin_conn username new_pass;
+          T.set_user_credentials admin_conn username new_pass;
           (match state with 
             | DbState.InUse _ -> T.kill_connections admin_conn username
             | DbState.Open _ | DbState.Fresh _ -> ());
@@ -70,16 +77,20 @@ module Make(M : DbState.StateBackend)(T : TestDatabase) = struct
           }
   let release conf token = 
     let manager = M.connect conf.mdb_config in
-    let db = M.load_db manager token in
-    (match db with
-      | DbState.InUse tid -> M.release manager tid
-      | _ -> M.destroy manager; failwith "Token database was not reserved");
+    M.release manager token;
     M.destroy manager
   let init conf_map = 
-    {
-      tdb_config = T.config_of_map conf_map;
-      mdb_config = M.config_of_map conf_map;
-      setup_file = List.assoc "sql.setup" conf_map;
-      reset_file = List.assoc "sql.reset" conf_map
-    }
+    let root = LibConfig.get_group conf_map "sql" in
+    if not (LibConfig.validate root (`Group [
+      ("setup", `String);
+      ("reset", `String)
+    ])) then
+      failwith "Bad configuration, missing sql file names"
+    else
+      {
+        tdb_config = T.config_of_map conf_map;
+        mdb_config = M.config_of_map conf_map;
+        setup_file = (LibConfig.get_scalar root ~path:"setup" LibConfig.string_value);
+        reset_file = (LibConfig.get_scalar root ~path:"reset" LibConfig.string_value)
+      }
 end
