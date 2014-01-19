@@ -1,23 +1,20 @@
-type config_map = (string * string) list
-
 module type TestDatabase = sig
-  type config
   type t
-  val admin_connection : config -> string -> string -> t
+  val admin_connection : string -> string -> t
   val set_user_credentials : t -> string -> string -> unit
   val kill_connections : t -> string -> unit
   val run_commands : t -> string -> unit
-  val config_of_map : Config.config_map -> config
+  val load_config : string -> unit
   val disconnect : t -> unit
 end
 
 module Make(M : DbState.StateBackend)(T : TestDatabase) = struct
-  type config = {
-    tdb_config : T.config;
-    mdb_config : M.config;
-    setup_file : string;
-    reset_file : string
-  }
+  module CF = Config_file
+  let tdb_config = new CF.group
+  let setup_file = new CF.list_cp CF.string_wrappers ~group:tdb_config
+    ["sql"; "setup" ] [] ""
+  let reset_file = new CF.list_cp CF.string_wrappers ~group:tdb_config
+    ["sql"; "reset"] [] ""
   type connection_info = {
     hostname: string;
     db_name: string;
@@ -25,6 +22,12 @@ module Make(M : DbState.StateBackend)(T : TestDatabase) = struct
     password: string;
     token: string
   }
+
+  let load_config conf_file =
+    tdb_config#read ~no_default:true conf_file;
+    M.load_config conf_file;
+    T.load_config conf_file
+    
 
   let generate_password () = 
     Random.self_init ();
@@ -36,17 +39,19 @@ module Make(M : DbState.StateBackend)(T : TestDatabase) = struct
     let in_c = open_in s in
     let file_size = in_channel_length in_c in
     let buffer = String.create file_size in
+    (* TODO: better error checking *)
     let _ = really_input in_c buffer 0 file_size in
     close_in in_c;
     buffer
-  let reserve conf lease = 
-    let manager = M.connect conf.mdb_config in
+
+  let reserve lease = 
+    let manager = M.connect () in
     match (M.get_candidate_db manager) with
       | None -> None
       | Some (state, host, db_name) ->
           let hostname = M.get_hostname manager host in
           let new_pass = generate_password () in
-          let admin_conn = T.admin_connection conf.tdb_config hostname db_name in
+          let admin_conn = T.admin_connection hostname db_name in
           let username = match state with
             | DbState.InUse tid -> M.get_user manager tid 
             | DbState.Open tid -> M.assign_user manager host tid
@@ -56,15 +61,20 @@ module Make(M : DbState.StateBackend)(T : TestDatabase) = struct
           (match state with 
             | DbState.InUse _ -> T.kill_connections admin_conn username
             | DbState.Open _ | DbState.Fresh _ -> ());
-          let cmd_file = match state with
-            | DbState.InUse _  | DbState.Open _ -> conf.reset_file 
-            | DbState.Fresh _ -> conf.setup_file in
+          let cmd_files = match state with
+            | DbState.InUse _  | DbState.Open _ -> reset_file#get 
+            | DbState.Fresh _ -> setup_file#get in
           let tid = match state with
-            | DbState.Fresh tid -> (tid :> ([`InUse | `Open | `Fresh],[`Setup]) DbState.tid)
-            | DbState.InUse tid -> (tid :> ([`InUse | `Open | `Fresh],[`Setup]) DbState.tid)
-            | DbState.Open tid -> (tid :> ([`InUse | `Open | `Fresh],[`Setup]) DbState.tid) in
-          let cmd_sql = read_file_fully cmd_file in
-          T.run_commands admin_conn cmd_sql;
+            | DbState.Fresh tid -> (tid :> [`InUse | `Open | `Fresh] DbState.tid)
+            | DbState.InUse tid -> (tid :> [`InUse | `Open | `Fresh] DbState.tid)
+            | DbState.Open tid -> (tid :> [`InUse | `Open | `Fresh] DbState.tid) in
+          let () = 
+            let rec run_sql = function
+              | [] -> ()
+              | h::t -> 
+                  T.run_commands admin_conn h; run_sql t
+            in run_sql cmd_files
+          in
           let token = M.mark_ready manager tid lease in
           T.disconnect admin_conn;
           M.destroy manager;
@@ -75,23 +85,8 @@ module Make(M : DbState.StateBackend)(T : TestDatabase) = struct
             password = new_pass;
             token = (M.string_of_token token)
           }
-  let release conf token = 
-    let manager = M.connect conf.mdb_config in
+  let release token = 
+    let manager = M.connect () in
     M.release manager token;
     M.destroy manager
-  let init conf_map = 
-    let root = LibConfig.sub_root conf_map "sql" in
-    if not (LibConfig.validate root (`Group [
-      ("setup", `String);
-      ("reset", `String)
-    ])) then
-      failwith "Bad configuration, missing sql file names"
-    else
-      let get_s = LibConfig.get_scalar root LibConfig.string_value in
-      {
-        tdb_config = T.config_of_map conf_map;
-        mdb_config = M.config_of_map conf_map;
-        setup_file = (get_s "setup");
-        reset_file = (get_s "reset")
-      }
 end

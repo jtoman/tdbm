@@ -1,12 +1,11 @@
 module StateBackend = DbState.Make(SqliteManagerBackend.SqliteBackendF)
 module Manager = DbManager.Make(StateBackend)(PostgresDatabase)
 
-let config = Config.load_config "/home/john/hacking/tdbm/tdbm.cfg";;
+let _ = Manager.load_config "/opt/tdbm.cfg";;
 
-let manager = Manager.init config in
-match Sys.argv.(1) with
+let () = match Sys.argv.(1) with
   | "reserve" -> 
-      let conn_info = Manager.reserve manager (int_of_string Sys.argv.(2)) in
+      let conn_info = Manager.reserve (int_of_string Sys.argv.(2)) in
       (match conn_info with
         | None -> print_endline "No available databases"
         | Some dbi -> Printf.printf "h: %s\ndb: %s\nu: %s\np: %s\ntoken: %s\n"
@@ -16,5 +15,5 @@ match Sys.argv.(1) with
           dbi.Manager.password
           dbi.Manager.token)
         
-  | "release" -> Manager.release manager Sys.argv.(2)
+  | "release" -> Manager.release Sys.argv.(2)
   | _ -> failwith ("Unknown command " ^ Sys.argv.(1))

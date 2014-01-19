@@ -1,10 +1,9 @@
 module StateBackend = DbState.Make(SqliteManagerBackend.SqliteBackendF)
 module Manager = DbManager.Make(StateBackend)(PostgresDatabase)
 
-let load_manager (cgi : Netcgi_fcgi.cgi) = 
-  let conf = Config.load_config (Sys.getenv "TDBM_CONFIG") in
-  let to_ret = Manager.init conf in
-  to_ret
+let load_manager () = 
+  let conf = Sys.getenv "TDBM_CONFIG" in
+  Manager.load_config conf
 
 let respond ?(status=`Ok) (cgi : Netcgi_fcgi.cgi) json = 
   let resp = Yojson.Basic.to_string json in
@@ -21,9 +20,9 @@ let handle_release (cgi : Netcgi_fcgi.cgi) =
       ("message",`String "Missing token")
     ])
   else
-    let manager = load_manager cgi in
+    load_manager ();
     let token = cgi#argument_value "token" in
-    Manager.release manager token;
+    Manager.release token;
     respond cgi (`Assoc [
       ("success", `Bool true);
       ("message", `String "ok")
@@ -38,9 +37,9 @@ let handle_reserve (cgi : Netcgi_fcgi.cgi) =
     ])
   else
     begin
-      let manager = load_manager cgi in
+      load_manager ();
       let lease = int_of_string (cgi#argument_value "lease") in
-      match (Manager.reserve manager lease) with
+      match (Manager.reserve lease) with
         | None -> respond cgi (`Assoc [ ("connection", `Null) ])
         | Some cinfo -> 
             let message = (`Assoc [
