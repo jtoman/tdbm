@@ -106,7 +106,7 @@ module SqliteBackendF(DBA : DbState.DbAccess) = struct
        ] get_host_id_sql
 
      let add_db_sql = 
-       "INSERT INTO db_state(db_host, db_name, state, username) VALUES(?,?,?,?)"
+       "INSERT INTO test_db(db_host, db_name, state, username) VALUES(?,?,?,?)"
 
      let add_db conn ?(stat=`Fresh) host database username = 
        let h_id = get_host_id conn host in
@@ -121,7 +121,7 @@ module SqliteBackendF(DBA : DbState.DbAccess) = struct
      let add_host conn host = 
        Dbal.db_exec conn ~params:[ s_param host ] add_host_sql
 
-     let enter_maint_sql = "UPDATE db_state SET state = ? WHERE db_name = ? AND db_host in (SELECT id FROM db_host WHERE host_name = ?)"
+     let enter_maint_sql = "UPDATE test_db SET state = ? WHERE db_name = ? AND db_host  = ?"
      let enter_maintainence conn host db = 
        let host_id = get_host_id conn host in
        Dbal.db_exec conn ~params:[
@@ -130,7 +130,7 @@ module SqliteBackendF(DBA : DbState.DbAccess) = struct
          (i_param host_id)
        ] enter_maint_sql
 
-     let leave_maint_sql = "UPDATE db_state SET state = ? WHERE db_name = ? AND state = ? AND db_host in (SELECT id FROM db_host WHERE host_name = ?)"
+     let leave_maint_sql = "UPDATE test_db SET state = ? WHERE db_name = ? AND state = ? AND db_host = ?"
 
      let leave_maintainence conn host db new_state = 
        let host_id = get_host_id conn host in

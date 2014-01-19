@@ -48,6 +48,8 @@ let kill_connections (conn : Postgresql.connection) user =
 
 let read_file_fully f_name = 
   let f = open_in f_name in
+  (* TODO: replace this with a more robust file reading
+     implementation *)
   let buf = String.create (in_channel_length f) in
   really_input f buf 0 (in_channel_length f);
   close_in f;

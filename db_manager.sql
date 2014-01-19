@@ -4,7 +4,7 @@ CREATE TABLE db_host(
 );
 
 
-CREATE TABLE db_state(id INTEGER PRIMARY KEY AUTOINCREMENT,
+CREATE TABLE test_db(id INTEGER PRIMARY KEY AUTOINCREMENT,
        db_host INTEGER,
        db_name TEXT,
        username TEXT NOT NULL,
