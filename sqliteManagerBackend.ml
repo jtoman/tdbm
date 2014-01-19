@@ -94,41 +94,34 @@ end
 module SqliteBackendF(DBA : DbState.DbAccess) = struct
   type t = Sqlite3.db
   type token = string
-  type host = int
-  type candidate = (DbState.db_state * host * string)
 
   let i_param = Dbal.int_param
   let s_param = Dbal.string_param
 
   module Admin = struct
-     let get_host_id_sql = "SELECT id FROM db_hosts WHERE host_name = ?";;
+     let get_host_id_sql = "SELECT id FROM db_host WHERE host_name = ?";;
      let get_host_id conn hostname = 
        Dbal.query_int conn ~params:[ 
          s_param hostname 
        ] get_host_id_sql
 
      let add_db_sql = 
-       "INSERT INTO db_state(db_host, db_name, state) VALUES(?,?,?)"
+       "INSERT INTO db_state(db_host, db_name, state, username) VALUES(?,?,?,?)"
 
-     let add_db conn host database = 
+     let add_db conn ?(stat=`Fresh) host database username = 
        let h_id = get_host_id conn host in
        Dbal.db_exec conn ~params:[
          (i_param h_id);
          (s_param database);
-         (s_param (DBA.string_of_status `Fresh))
+         (s_param (DBA.string_of_status stat));
+         (s_param username)
        ] add_db_sql
 
-     let add_host_sql = "INSERT INTO db_hosts(host_name) VALUES(?)"
+     let add_host_sql = "INSERT INTO db_host(host_name) VALUES(?)"
      let add_host conn host = 
        Dbal.db_exec conn ~params:[ s_param host ] add_host_sql
 
-     let add_user_sql = "INSERT INTO db_credentials (db_host, username) VALUES (?,?)"
-
-     let add_user conn hostname username = 
-       let host_id = get_host_id conn hostname in
-       Dbal.db_exec conn ~params:[ (i_param host_id); (s_param username) ] add_user_sql
-
-     let enter_maint_sql = "UPDATE db_state SET state = ? WHERE db_name = ? AND db_host in (SELECT id FROM db_hosts WHERE host_name = ?)"
+     let enter_maint_sql = "UPDATE db_state SET state = ? WHERE db_name = ? AND db_host in (SELECT id FROM db_host WHERE host_name = ?)"
      let enter_maintainence conn host db = 
        let host_id = get_host_id conn host in
        Dbal.db_exec conn ~params:[
@@ -137,7 +130,7 @@ module SqliteBackendF(DBA : DbState.DbAccess) = struct
          (i_param host_id)
        ] enter_maint_sql
 
-     let leave_maint_sql = "UPDATE db_state SET state = ? WHERE db_name = ? AND state = ? AND db_host in (SELECT id FROM db_hosts WHERE host_name = ?)"
+     let leave_maint_sql = "UPDATE db_state SET state = ? WHERE db_name = ? AND state = ? AND db_host in (SELECT id FROM db_host WHERE host_name = ?)"
 
      let leave_maintainence conn host db new_state = 
        let host_id = get_host_id conn host in
@@ -157,20 +150,21 @@ module SqliteBackendF(DBA : DbState.DbAccess) = struct
 
   let connect () = Sqlite3.db_open db_file#get
 
-  let find_sql = Printf.sprintf "SELECT * FROM (SELECT id, db_host, db_name, state FROM db_state WHERE state = '%s' OR state = '%s' UNION SELECT id, db_host, db_name, state FROM db_state WHERE state = '%s' AND expiry < ?) LIMIT 1"
+  let find_sql = Printf.sprintf "SELECT d.id, host_name, db_name, username, state FROM (SELECT id, db_host, db_name, username, state FROM test_db WHERE state = '%s' OR state = '%s' UNION SELECT id, db_host, db_name, username, state FROM test_db WHERE state = '%s' AND expiry < ?) d INNER JOIN db_host h ON h.id = d.db_host LIMIT 1"
     (DBA.string_of_status `Open)
     (DBA.string_of_status `Fresh)
     (DBA.string_of_status `InUse)
 
-  let update_state_sql = "UPDATE db_state SET state = ? WHERE id = ?";;
+  let update_state_sql = "UPDATE test_db SET state = ? WHERE id = ?";;
 
   let db_state_mapper = fun s ->
     let i_tid = Dbal.extract_int s.(0) in
-    let host = Dbal.extract_int s.(1) in
+    let host = Dbal.extract_string s.(1) in
     let db_name = Dbal.extract_string s.(2) in
-    let s_state = Dbal.extract_string s.(3) in
+    let user = Dbal.extract_string s.(3) in
+    let s_state = Dbal.extract_string s.(4) in
     let state = DBA.of_db i_tid s_state in
-    (i_tid, state, host, db_name)
+    (i_tid, state, host, db_name, user)
 
   let get_candidate_db conn = 
     let ex = Dbal.db_exec conn in
@@ -182,53 +176,20 @@ module SqliteBackendF(DBA : DbState.DbAccess) = struct
       | None -> 
           ex "ROLLBACK"; 
           None
-      | Some (i_tid,state,host,db_name) -> 
+      | Some (i_tid,state,host,db_name, user) -> 
           ex ~params:[
             (s_param (DBA.string_of_status `Setup));
             (i_param i_tid)
           ] update_state_sql;
           ex "COMMIT";
-          Some (state, host, db_name);;
-  
-  let get_user_sql = "SELECT user_id, username FROM user_assignment INNER JOIN db_user ON user_id = id WHERE db_id = ?"
-
-  let user_mapper s = 
-    (Dbal.extract_int s.(0)),
-    (Dbal.extract_string s.(1))
-
-  let get_user conn tid = 
-    let (_,username) = Dbal.map_object conn ~params:[ i_param (DBA.unwrap_tid tid) ] get_user_sql user_mapper in
-    username
-
-  let find_user_sql = "SELECT id, username FROM db_user LEFT JOIN user_assignment ON user_id = id WHERE db_id IS NULL AND db_host = ? LIMIT 1"
-  let assign_user_sql = "INSERT INTO user_assignment (user_id, db_id) VALUES (?, ?)"
-
-  let assign_user conn host tid = 
-    let ex = Dbal.db_exec conn in
-    ex "BEGIN IMMEDIATE TRANSACTION";
-    let (user_id, username) = Dbal.map_object conn ~params:[
-      i_param host
-    ] find_user_sql user_mapper in
-    ex ~params:[
-      (i_param (DBA.unwrap_tid tid));
-      (i_param user_id)
-    ] assign_user_sql;
-    ex "COMMIT";
-    username
-
-
-  let get_hostname_sql = "SELECT host_name FROM db_hosts WHERE id = ?"
-    
-  let get_hostname conn host = 
-    Dbal.query_string conn ~params:[ i_param host ] get_hostname_sql
-
+          Some (state, host, db_name, user);;
 
   let generate_token t expire_time = 
     let to_hash = Printf.sprintf "BRAWNDO@%d@%d" t expire_time in
     let hash = Digest.string to_hash in
     Digest.to_hex hash
 
-  let mark_ready_sql = Printf.sprintf "UPDATE db_state SET state = '%s', expiry = ?, token = ? WHERE id = ?" (DBA.string_of_status `InUse)
+  let mark_ready_sql = Printf.sprintf "UPDATE test_db SET state = '%s', expiry = ?, token = ? WHERE id = ?" (DBA.string_of_status `InUse)
 
   let mark_ready conn t expiry = 
     let tid = DBA.unwrap_tid t in
@@ -241,23 +202,14 @@ module SqliteBackendF(DBA : DbState.DbAccess) = struct
     ] mark_ready_sql;
     token
 
-  let reset_state_sql = "UPDATE db_state SET state = 'OPEN', expiry = NULL, token = null WHERE id = ?"
-  let release_user_sql = "DELETE FROM user_assignment WHERE db_id = ?"
+  let release_db_sql = Printf.sprintf "UPDATE test_db SET state = '%s', expiry = NULL, token = NULL WHERE token = ? AND state = '%s'" 
+    (DBA.string_of_status `Open)
+    (DBA.string_of_status `InUse)
 
   let release conn token =
     let ex = Dbal.db_exec conn in
-    ex "BEGIN IMMEDIATE TRANSACTION";
-    let tid' = Dbal.map_null_object conn ~params:[s_param token] "SELECT id FROM db_state WHERE token = ?" (fun s -> Dbal.extract_int s.(0)) in
-    match tid' with
-      | None -> ex "ROLLBACK"
-      | Some tid -> begin
-          let p = [ i_param tid ] in
-          ex ~params:p release_user_sql;
-          ex ~params:p reset_state_sql;
-          ex "COMMIT"
-      end
-      
-      
+    ex ~params:[ s_param token ] release_db_sql
+
   let destroy conn = 
     ignore (Sqlite3.db_close conn)
 

@@ -48,15 +48,9 @@ module Make(M : DbState.StateBackend)(T : TestDatabase) = struct
     let manager = M.connect () in
     match (M.get_candidate_db manager) with
       | None -> None
-      | Some (state, host, db_name) ->
-          let hostname = M.get_hostname manager host in
+      | Some (state, hostname, db_name, username) ->
           let new_pass = generate_password () in
           let admin_conn = T.admin_connection hostname db_name in
-          let username = match state with
-            | DbState.InUse tid -> M.get_user manager tid 
-            | DbState.Open tid -> M.assign_user manager host tid
-            | DbState.Fresh tid -> 
-                M.assign_user manager host tid in
           T.set_user_credentials admin_conn username new_pass;
           (match state with 
             | DbState.InUse _ -> T.kill_connections admin_conn username
@@ -65,9 +59,10 @@ module Make(M : DbState.StateBackend)(T : TestDatabase) = struct
             | DbState.InUse _  | DbState.Open _ -> reset_file#get 
             | DbState.Fresh _ -> setup_file#get in
           let tid = match state with
-            | DbState.Fresh tid -> (tid :> [`InUse | `Open | `Fresh] DbState.tid)
-            | DbState.InUse tid -> (tid :> [`InUse | `Open | `Fresh] DbState.tid)
-            | DbState.Open tid -> (tid :> [`InUse | `Open | `Fresh] DbState.tid) in
+            | DbState.Fresh tid
+            | DbState.InUse tid
+            | DbState.Open tid-> tid
+          in
           let () = 
             let rec run_sql = function
               | [] -> ()
