@@ -1,4 +1,4 @@
-<postgresDatabase.ml*> or <console.{native,byte}> or <fcgi_interface.{native,byte}>: package(postgresql), package(config-file), thread
+<postgresDatabase.ml*> or <console.{native,byte}> or <fcgi_interface.{native,byte}>: package(postgresql), package(config-file), thread, package(core)
 <sqliteManagerBackend.ml*> or <console.{native,byte}> or <fcgi_interface.{native,byte}> or <admin.*>: package(sqlite3), package(config-file), package(unix)
 <dbManager.ml*>: package(config-file)
 <fcgi_interface.*>: package(netcgi2), package(yojson)

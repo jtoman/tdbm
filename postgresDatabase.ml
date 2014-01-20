@@ -47,13 +47,10 @@ let kill_connections (conn : Postgresql.connection) user =
             ~params:[| user |] kill_connection_sql)
 
 let read_file_fully f_name = 
-  let f = open_in f_name in
-  (* TODO: replace this with a more robust file reading
-     implementation *)
-  let buf = String.create (in_channel_length f) in
-  really_input f buf 0 (in_channel_length f);
-  close_in f;
-  buf
+  let f_chan = Core.In_channel.create f_name in
+  let f_cont  = Core.In_channel.input_all f_chan in
+  Core.In_channel.close f_chan;
+  f_cont
 
 let run_commands (conn : Postgresql.connection) command_file = 
   try 
